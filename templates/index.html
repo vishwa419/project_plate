@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white shadow-lg rounded-lg p-6">
+    <h2 class="text-xl font-semibold mb-4 text-center">Generate Project Plan</h2>
+    
+    <form 
+        hx-post="/plan" 
+        hx-target="#project-plan-results" 
+        hx-indicator="#loading-spinner"
+        class="space-y-4"
+    >
+        <div>
+            <label for="project_description" class="block text-sm font-medium text-gray-700">
+                Project Description
+            </label>
+            <textarea 
+                id="project_description" 
+                name="project_description" 
+                rows="4" 
+                required
+                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                placeholder="Describe your software project (e.g., 'Build a web application for task management with collaborative features')"
+            ></textarea>
+        </div>
+        
+        <div class="relative">
+            <button 
+                type="submit" 
+                class="submit-btn w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition duration-300"
+            >
+                Generate Project Plan
+            </button>
+            
+            <!-- Loading Spinner -->
+            <div 
+                id="loading-spinner" 
+                class="htmx-indicator text-center w-full"
+            >
+                <div class="spinner-border text-blue-600" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="text-gray-600 mt-2">Generating project plan...</p>
+            </div>
+        </div>
+    </form>
+
+    <!-- Project Plan Results Container -->
+    <div 
+        id="project-plan-results" 
+        class="mt-6"
+    >
+        <!-- Results will be dynamically loaded here -->
+    </div>
+</div>
+{% endblock %}

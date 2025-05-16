@@ -1,36 +1,3 @@
-"""
-Project Planning Tool: Finds repositories and creates integration plans for software projects.
-Provides automated decomposition of projects and repository matching using HuggingFace Transformers.
-"""
-
-import json
-import logging
-import os
-from typing import Dict, List, Any, Optional, Tuple, Union
-import re
-import base64
-from functools import lru_cache
-import datetime
-
-import requests
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-from transformers import AutoTokenizer, AutoModel
-import torch
-from sentence_transformers import SentenceTransformer
-
-# Configuration
-GITHUB_API_URL = "https://api.github.com"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-
-# Set up logging
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("project_planner")
-
 # ======== Model Setup ========
 @lru_cache(maxsize=1)
 def get_llm_model():
@@ -261,26 +228,98 @@ def decompose_project(project_description: str) -> List[Dict[str, Any]]:
                 "embedding": get_embeddings("Backend API Server-side logic and data processing Python FastAPI")
             }
         ]
-
-
-
-
-
-
-
-
-
-# ======== Demo Usage ========
-
-if __name__ == "__main__":
-    # Example project description
-    project_description = """
-    Build a web application that allows users to upload images, 
-    apply ML-based filters, and share them on social media.
-    """
+def summarize_readme(readme_content: str) -> str:
+    """Summarize README content using LLM."""
+    if not readme_content or len(readme_content) < 100:
+        return readme_content
     
-    # Run the planner
-    plan = create_project_plan(project_description)
+    # Truncate very long READMEs to avoid token limits
+    if len(readme_content) > 4000:
+        readme_content = readme_content[:4000] + "..."
     
-    # Output the plan (could be saved to file or displayed in a UI)
-    print(json.dumps(plan, indent=2, default=str))
+    system_prompt = "Summarize the following README in 2-3 sentences, focusing on what the repository does and its key features:"
+    
+    return query_huggingface(readme_content, system_prompt=system_prompt, max_tokens=200)
+
+def find_repos_for_subproject(subproject: Dict[str, Any], n: int = 3) -> List[Dict[str, Any]]:
+    """Find repositories for a specific subproject, with efficient search query construction."""
+    # Construct optimized search query from subproject details
+    search_terms = [
+        subproject["name"],
+        *[req for req in subproject["tech_requirements"] if len(req.split()) <= 3]  # Only include short tech requirements
+    ]
+    
+    # Use NLP to extract key terms from description
+    if subproject["description"]:
+        # Simple keyword extraction - in production you might use NLP techniques
+        stop_words = {"a", "an", "the", "in", "on", "at", "to", "for", "with", "and", "or", "of"}
+        desc_words = [word.lower() for word in re.findall(r'\w+', subproject["description"]) 
+                      if word.lower() not in stop_words and len(word) > 3]
+        
+        # Take most important keywords (longer words tend to be more specific)
+        desc_words.sort(key=len, reverse=True)
+        search_terms.extend(desc_words[:3])
+    
+    # Make query unique by removing duplicates while preserving order
+    seen = set()
+    query_terms = [term for term in search_terms if not (term.lower() in seen or seen.add(term.lower()))]
+    
+    # Join terms and ensure we don't exceed GitHub's query length limits
+    query = " ".join(query_terms)
+    if len(query) > 256:  # GitHub has query length limits
+        query = query[:256]
+    
+    return search_github_repos(query, n)
+
+# ======== Main Execution Function ========
+
+def create_project_plan(project_description: str) -> Dict[str, Any]:
+    """Create a complete project plan from description with improved execution flow."""
+    logger.info("Starting project planning process")
+    
+    # Step 1: Decompose project into subprojects
+    logger.info("Decomposing project...")
+    subprojects = decompose_project(project_description)
+    if not subprojects:
+        return {"error": "Failed to decompose project"}
+    
+    # Step 2: Find repositories for each subproject
+    logger.info("Searching repositories...")
+    repos_by_subproject = {}
+    for subproject in subprojects:
+        name = subproject["name"]
+        repos = find_repos_for_subproject(subproject, n=5)  # Get top 5 repos
+        if repos:
+            # Rank repos by similarity
+            ranked_repos = rank_repos_by_similarity(subproject, repos)
+            repos_by_subproject[name] = ranked_repos
+    
+    # Step 3: Select best repository for each subproject
+    selected_repos = {}
+    for name, repos in repos_by_subproject.items():
+        if repos:
+            selected_repos[name] = repos[0]  # Select highest ranked repo
+    
+    # Step 4: Analyze conflicts
+    logger.info("Analyzing potential conflicts...")
+    conflicts = analyze_conflicts(subprojects, repos_by_subproject)
+    
+    # Step 5: Generate integration plan
+    logger.info("Generating integration plan...")
+    integration_plan = generate_integration_plan(
+        project_description, 
+        subprojects, 
+        selected_repos,
+        conflicts
+    )
+    
+    # Build complete result
+    return {
+        "project_description": project_description,
+        "subprojects": subprojects,
+        "selected_repositories": selected_repos,
+        "alternative_repositories": repos_by_subproject,
+        "conflicts": conflicts,
+        "integration_plan": integration_plan,
+        "timestamp": datetime.datetime.now().isoformat()
+ 
